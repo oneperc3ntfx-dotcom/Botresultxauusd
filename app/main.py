@@ -28,21 +28,15 @@ def now():
 
 
 # =========================
-# SESSION CONTROL
+# SESSION
 # =========================
 def is_active_session():
     n = now()
-    wd = n.weekday()
-    h = n.hour
-    m = n.minute
-
-    # weekend OFF
-    if wd >= 5:
+    if n.weekday() >= 5:
         return False
 
-    # session 07:00 - 03:50 next day
-    if h >= 7 or h < 4:
-        if h == 3 and m > 50:
+    if n.hour >= 7 or n.hour < 4:
+        if n.hour == 3 and n.minute > 50:
             return False
         return True
 
@@ -153,7 +147,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================
-# SESSION LOOP
+# LOOP
 # =========================
 def session_loop():
     global active_trades
@@ -173,9 +167,6 @@ def session_loop():
         time.sleep(15)
 
 
-# =========================
-# DAILY REPORT
-# =========================
 def report_loop():
     while True:
 
@@ -186,13 +177,13 @@ def report_loop():
             sl = len([x for x in active_trades if x["status"] == "SL"])
 
             msg = f"""
-📊 DAILY RESULT XAUUSD
+📊 DAILY RESULT
 
 TP1: {tp1}
 TP2: {tp2}
 SL: {sl}
 
-Total Trades: {len(active_trades)}
+Total: {len(active_trades)}
 """
 
             send_result(msg)
@@ -202,22 +193,30 @@ Total Trades: {len(active_trades)}
 
 
 # =========================
-# BOT START (FIX CONFLICT SAFE)
+# BOT START
 # =========================
 def start_bot():
 
-    app = (
-        Application.builder()
-        .token(TELEGRAM_BOT_TOKEN)
-        .concurrent_updates(True)
-        .build()
-    )
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+    # START MESSAGE (INI YANG KAMU MAU)
+    async def on_start(app):
+        try:
+            bot.send_message(
+                chat_id=TELEGRAM_CHAT_ID,
+                text="🤖 BOT AKTIF ✅\nSystem XAUUSD Tracker Running..."
+            )
+        except Exception as e:
+            print("START MSG ERROR:", e)
+
+    app.post_init = on_start
 
     app.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
     )
 
-    # IMPORTANT: anti-conflict safety
+    print("BOT RUNNING...")
+
     app.run_polling(
         drop_pending_updates=True,
         allowed_updates=["message"]
