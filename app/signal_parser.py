@@ -1,7 +1,4 @@
 def parse_signal(text):
-    # FORMAT:
-    # BUY XAUUSD 2350 TP1 2355 TP2 2360 SL 2345
-
     try:
         p = text.split()
 
