@@ -3,7 +3,6 @@ import threading
 from datetime import datetime
 import pytz
 
-from telegram import Bot, Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
 from config import (
@@ -28,10 +27,11 @@ def now():
 
 
 # =========================
-# SESSION
+# SESSION CONTROL
 # =========================
 def is_active_session():
     n = now()
+
     if n.weekday() >= 5:
         return False
 
@@ -59,22 +59,20 @@ def is_report_time():
 
 
 # =========================
-# BOT INIT
+# STORAGE
 # =========================
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
-
 active_trades = []
 
 
 # =========================
-# SAFE SEND
+# SAFE SEND (ASYNC CORRECT)
 # =========================
-def send_result(msg):
+async def send(app, msg):
     try:
-        bot.send_message(
+        await app.bot.send_message(
             chat_id=TELEGRAM_CHAT_ID,
-            message_thread_id=RESULT_TOPIC_ID,
-            text=msg
+            text=msg,
+            message_thread_id=RESULT_TOPIC_ID
         )
     except Exception as e:
         print("SEND ERROR:", e)
@@ -87,7 +85,7 @@ def add_trade(trade):
     active_trades.append(trade)
 
 
-def check_trades():
+def check_trades(app):
     price = get_price()
 
     for t in active_trades:
@@ -98,41 +96,40 @@ def check_trades():
 
             if price >= t["tp2"]:
                 t["status"] = "TP2"
-                send_result(f"🎯 TP2 HIT\n{t}")
+                threading.Thread(target=lambda: asyncio.run(send(app, f"🎯 TP2 HIT\n{t}"))).start()
 
             elif price >= t["tp1"]:
                 t["status"] = "TP1"
-                send_result(f"✅ TP1 HIT\n{t}")
+                threading.Thread(target=lambda: asyncio.run(send(app, f"✅ TP1 HIT\n{t}"))).start()
 
             elif price <= t["sl"]:
                 t["status"] = "SL"
-                send_result(f"❌ SL HIT\n{t}")
+                threading.Thread(target=lambda: asyncio.run(send(app, f"❌ SL HIT\n{t}"))).start()
 
         else:
 
             if price <= t["tp2"]:
                 t["status"] = "TP2"
-                send_result(f"🎯 TP2 HIT\n{t}")
+                threading.Thread(target=lambda: asyncio.run(send(app, f"🎯 TP2 HIT\n{t}"))).start()
 
             elif price <= t["tp1"]:
                 t["status"] = "TP1"
-                send_result(f"✅ TP1 HIT\n{t}")
+                threading.Thread(target=lambda: asyncio.run(send(app, f"✅ TP1 HIT\n{t}"))).start()
 
             elif price >= t["sl"]:
                 t["status"] = "SL"
-                send_result(f"❌ SL HIT\n{t}")
+                threading.Thread(target=lambda: asyncio.run(send(app, f"❌ SL HIT\n{t}"))).start()
 
 
 # =========================
 # TELEGRAM HANDLER
 # =========================
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_message(update: ContextTypes.DEFAULT_TYPE, context):
 
     msg = update.message
     if not msg:
         return
 
-    # filter topic
     if SIGNAL_TOPIC_ID and msg.message_thread_id != SIGNAL_TOPIC_ID:
         return
 
@@ -143,31 +140,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if trade:
         add_trade(trade)
-        send_result(f"📥 SIGNAL SAVED\n{trade}")
+        await send(context.application, f"📥 SIGNAL SAVED\n{trade}")
 
 
 # =========================
-# LOOP
+# LOOP THREADS
 # =========================
-def session_loop():
+def session_loop(app):
     global active_trades
 
     while True:
 
         if is_new_session():
             active_trades = []
-            send_result("🟢 NEW SESSION STARTED")
+            asyncio.run(send(app, "🟢 NEW SESSION STARTED"))
 
         if is_close_session():
-            send_result("🔴 SESSION CLOSED")
+            asyncio.run(send(app, "🔴 SESSION CLOSED"))
 
         if is_active_session():
-            check_trades()
+            check_trades(app)
 
         time.sleep(15)
 
 
-def report_loop():
+def report_loop(app):
     while True:
 
         if is_report_time():
@@ -186,28 +183,25 @@ SL: {sl}
 Total: {len(active_trades)}
 """
 
-            send_result(msg)
+            asyncio.run(send(app, msg))
             time.sleep(60)
 
         time.sleep(10)
 
 
 # =========================
-# BOT START
+# START BOT (FIXED)
 # =========================
 def start_bot():
 
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # START MESSAGE (INI YANG KAMU MAU)
+    # START MESSAGE (ANTI ERROR)
     async def on_start(app):
-        try:
-            bot.send_message(
-                chat_id=TELEGRAM_CHAT_ID,
-                text="🤖 BOT AKTIF ✅\nSystem XAUUSD Tracker Running..."
-            )
-        except Exception as e:
-            print("START MSG ERROR:", e)
+        await app.bot.send_message(
+            chat_id=TELEGRAM_CHAT_ID,
+            text="🤖 BOT AKTIF ✅\nXAUUSD Signal System Running..."
+        )
 
     app.post_init = on_start
 
@@ -217,6 +211,11 @@ def start_bot():
 
     print("BOT RUNNING...")
 
+    # THREAD LOOP
+    threading.Thread(target=session_loop, args=(app,), daemon=True).start()
+    threading.Thread(target=report_loop, args=(app,), daemon=True).start()
+
+    # SAFE POLLING
     app.run_polling(
         drop_pending_updates=True,
         allowed_updates=["message"]
@@ -227,8 +226,4 @@ def start_bot():
 # MAIN
 # =========================
 if __name__ == "__main__":
-
-    threading.Thread(target=session_loop, daemon=True).start()
-    threading.Thread(target=report_loop, daemon=True).start()
-
     start_bot()
