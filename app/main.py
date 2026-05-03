@@ -36,9 +36,11 @@ def is_active_session():
     h = n.hour
     m = n.minute
 
+    # weekend OFF
     if wd >= 5:
         return False
 
+    # session 07:00 - 03:50 next day
     if h >= 7 or h < 4:
         if h == 3 and m > 50:
             return False
@@ -63,7 +65,7 @@ def is_report_time():
 
 
 # =========================
-# BOT
+# BOT INIT
 # =========================
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
@@ -71,18 +73,21 @@ active_trades = []
 
 
 # =========================
-# SEND MESSAGE
+# SAFE SEND
 # =========================
 def send_result(msg):
-    bot.send_message(
-        chat_id=TELEGRAM_CHAT_ID,
-        message_thread_id=RESULT_TOPIC_ID,
-        text=msg
-    )
+    try:
+        bot.send_message(
+            chat_id=TELEGRAM_CHAT_ID,
+            message_thread_id=RESULT_TOPIC_ID,
+            text=msg
+        )
+    except Exception as e:
+        print("SEND ERROR:", e)
 
 
 # =========================
-# TRADE HANDLER
+# TRADE ENGINE
 # =========================
 def add_trade(trade):
     active_trades.append(trade)
@@ -130,10 +135,10 @@ def check_trades():
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     msg = update.message
-
     if not msg:
         return
 
+    # filter topic
     if SIGNAL_TOPIC_ID and msg.message_thread_id != SIGNAL_TOPIC_ID:
         return
 
@@ -181,13 +186,13 @@ def report_loop():
             sl = len([x for x in active_trades if x["status"] == "SL"])
 
             msg = f"""
-📊 DAILY RESULT
+📊 DAILY RESULT XAUUSD
 
 TP1: {tp1}
 TP2: {tp2}
 SL: {sl}
 
-Total: {len(active_trades)}
+Total Trades: {len(active_trades)}
 """
 
             send_result(msg)
@@ -197,16 +202,26 @@ Total: {len(active_trades)}
 
 
 # =========================
-# START BOT
+# BOT START (FIX CONFLICT SAFE)
 # =========================
 def start_bot():
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+    app = (
+        Application.builder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .concurrent_updates(True)
+        .build()
+    )
 
     app.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
     )
 
-    app.run_polling()
+    # IMPORTANT: anti-conflict safety
+    app.run_polling(
+        drop_pending_updates=True,
+        allowed_updates=["message"]
+    )
 
 
 # =========================
@@ -214,7 +229,7 @@ def start_bot():
 # =========================
 if __name__ == "__main__":
 
-    threading.Thread(target=session_loop).start()
-    threading.Thread(target=report_loop).start()
+    threading.Thread(target=session_loop, daemon=True).start()
+    threading.Thread(target=report_loop, daemon=True).start()
 
     start_bot()
