@@ -1,16 +1,23 @@
 import requests
-from config import FINNHUB_API_KEY, SYMBOL
+from config import FINNHUB_API_KEY, FINNHUB_SYMBOL
+
 
 def get_price():
-    url = f"https://finnhub.io/api/v1/quote"
+    url = "https://finnhub.io/api/v1/quote"
+
     params = {
-        "symbol": SYMBOL,
+        "symbol": FINNHUB_SYMBOL,
         "token": FINNHUB_API_KEY
     }
 
-    r = requests.get(url, params=params)
-    data = r.json()
+    try:
+        r = requests.get(url, params=params, timeout=10)
+        data = r.json()
 
-    # Finnhub returns:
-    # c = current price
-    return float(data["c"])
+        if "c" not in data:
+            return 0.0
+
+        return float(data["c"])
+
+    except:
+        return 0.0
