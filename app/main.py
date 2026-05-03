@@ -14,6 +14,7 @@ from config import (
 )
 
 from market_data import get_price
+from signal_parser import parse_signal
 
 
 # =========================
@@ -35,11 +36,9 @@ def is_active_session():
     h = n.hour
     m = n.minute
 
-    # weekend off
     if wd >= 5:
         return False
 
-    # active 07:00 - 03:50 next day
     if h >= 7 or h < 4:
         if h == 3 and m > 50:
             return False
@@ -64,7 +63,7 @@ def is_report_time():
 
 
 # =========================
-# BOT INIT
+# BOT
 # =========================
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
@@ -72,40 +71,12 @@ active_trades = []
 
 
 # =========================
-# SIGNAL PARSER
-# =========================
-def parse_signal(text):
-    try:
-        p = text.split()
-
-        return {
-            "direction": p[0],
-            "pair": p[1],
-            "entry": float(p[2]),
-            "tp1": float(p[4]),
-            "tp2": float(p[6]),
-            "sl": float(p[8]),
-            "status": "ACTIVE"
-        }
-    except:
-        return None
-
-
-# =========================
-# TELEGRAM SEND
+# SEND MESSAGE
 # =========================
 def send_result(msg):
     bot.send_message(
         chat_id=TELEGRAM_CHAT_ID,
         message_thread_id=RESULT_TOPIC_ID,
-        text=msg
-    )
-
-
-def send_signal(msg):
-    bot.send_message(
-        chat_id=TELEGRAM_CHAT_ID,
-        message_thread_id=SIGNAL_TOPIC_ID,
         text=msg
     )
 
@@ -120,37 +91,37 @@ def add_trade(trade):
 def check_trades():
     price = get_price()
 
-    for trade in active_trades:
-        if trade["status"] != "ACTIVE":
+    for t in active_trades:
+        if t["status"] != "ACTIVE":
             continue
 
-        if trade["direction"] == "BUY":
+        if t["direction"] == "BUY":
 
-            if price >= trade["tp2"]:
-                trade["status"] = "TP2"
-                send_result(f"🎯 TP2 HIT\n{trade}")
+            if price >= t["tp2"]:
+                t["status"] = "TP2"
+                send_result(f"🎯 TP2 HIT\n{t}")
 
-            elif price >= trade["tp1"]:
-                trade["status"] = "TP1"
-                send_result(f"✅ TP1 HIT\n{trade}")
+            elif price >= t["tp1"]:
+                t["status"] = "TP1"
+                send_result(f"✅ TP1 HIT\n{t}")
 
-            elif price <= trade["sl"]:
-                trade["status"] = "SL"
-                send_result(f"❌ SL HIT\n{trade}")
+            elif price <= t["sl"]:
+                t["status"] = "SL"
+                send_result(f"❌ SL HIT\n{t}")
 
         else:
 
-            if price <= trade["tp2"]:
-                trade["status"] = "TP2"
-                send_result(f"🎯 TP2 HIT\n{trade}")
+            if price <= t["tp2"]:
+                t["status"] = "TP2"
+                send_result(f"🎯 TP2 HIT\n{t}")
 
-            elif price <= trade["tp1"]:
-                trade["status"] = "TP1"
-                send_result(f"✅ TP1 HIT\n{trade}")
+            elif price <= t["tp1"]:
+                t["status"] = "TP1"
+                send_result(f"✅ TP1 HIT\n{t}")
 
-            elif price >= trade["sl"]:
-                trade["status"] = "SL"
-                send_result(f"❌ SL HIT\n{trade}")
+            elif price >= t["sl"]:
+                t["status"] = "SL"
+                send_result(f"❌ SL HIT\n{t}")
 
 
 # =========================
@@ -160,8 +131,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     msg = update.message
 
-    # hanya baca dari SIGNAL TOPIC
-    if msg.message_thread_id != SIGNAL_TOPIC_ID:
+    if not msg:
+        return
+
+    if SIGNAL_TOPIC_ID and msg.message_thread_id != SIGNAL_TOPIC_ID:
         return
 
     if not is_active_session():
@@ -171,42 +144,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if trade:
         add_trade(trade)
-        send_signal(f"📥 SIGNAL SAVED\n{trade}")
+        send_result(f"📥 SIGNAL SAVED\n{trade}")
 
 
 # =========================
-# DAILY REPORT
+# SESSION LOOP
 # =========================
-def daily_report():
-    while True:
-
-        if is_report_time():
-
-            tp1 = len([t for t in active_trades if t["status"] == "TP1"])
-            tp2 = len([t for t in active_trades if t["status"] == "TP2"])
-            sl = len([t for t in active_trades if t["status"] == "SL"])
-
-            msg = f"""
-📊 DAILY REPORT XAUUSD
-
-TP1: {tp1}
-TP2: {tp2}
-SL: {sl}
-
-Total Trades: {len(active_trades)}
-"""
-
-            send_result(msg)
-
-            time.sleep(60)
-
-        time.sleep(10)
-
-
-# =========================
-# SESSION CONTROL LOOP
-# =========================
-def session_manager():
+def session_loop():
     global active_trades
 
     while True:
@@ -222,6 +166,34 @@ def session_manager():
             check_trades()
 
         time.sleep(15)
+
+
+# =========================
+# DAILY REPORT
+# =========================
+def report_loop():
+    while True:
+
+        if is_report_time():
+
+            tp1 = len([x for x in active_trades if x["status"] == "TP1"])
+            tp2 = len([x for x in active_trades if x["status"] == "TP2"])
+            sl = len([x for x in active_trades if x["status"] == "SL"])
+
+            msg = f"""
+📊 DAILY RESULT
+
+TP1: {tp1}
+TP2: {tp2}
+SL: {sl}
+
+Total: {len(active_trades)}
+"""
+
+            send_result(msg)
+            time.sleep(60)
+
+        time.sleep(10)
 
 
 # =========================
@@ -242,7 +214,7 @@ def start_bot():
 # =========================
 if __name__ == "__main__":
 
-    threading.Thread(target=session_manager).start()
-    threading.Thread(target=daily_report).start()
+    threading.Thread(target=session_loop).start()
+    threading.Thread(target=report_loop).start()
 
     start_bot()
